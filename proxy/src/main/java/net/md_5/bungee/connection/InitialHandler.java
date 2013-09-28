@@ -1,6 +1,8 @@
 package net.md_5.bungee.connection;
 
 import com.google.common.base.Preconditions;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import io.netty.util.concurrent.ScheduledFuture;
 import java.math.BigInteger;
 import java.net.InetSocketAddress;
@@ -83,6 +85,8 @@ public class InitialHandler extends PacketHandler implements PendingConnection
     private ScheduledFuture<?> pingFuture;
     private InetSocketAddress vHost;
     private byte version = -1;
+    @Getter
+    private String UUID;
 
     private enum State
     {
@@ -244,18 +248,9 @@ public class InitialHandler extends PacketHandler implements PendingConnection
         if ( BungeeCord.getInstance().config.isOnlineMode() )
         {
             String encName = URLEncoder.encode( InitialHandler.this.getName(), "UTF-8" );
+            String encID = URLEncoder.encode( InitialHandler.this.request.getServerId(), "UTF-8" );
 
-            MessageDigest sha = MessageDigest.getInstance( "SHA-1" );
-            for ( byte[] bit : new byte[][]
-            {
-                request.getServerId().getBytes( "ISO_8859_1" ), sharedKey.getEncoded(), EncryptionUtil.keys.getPublic().getEncoded()
-            } )
-            {
-                sha.update( bit );
-            }
-
-            String encodedHash = URLEncoder.encode( new BigInteger( sha.digest() ).toString( 16 ), "UTF-8" );
-            String authURL = "http://session.minecraft.net/game/checkserver.jsp?user=" + encName + "&serverId=" + encodedHash;
+            String authURL = "https://sessionserver.mojang.com/session/minecraft/hasJoined?username=" + encName + "&serverId=" + encID;
 
             Callback<String> handler = new Callback<String>()
             {
@@ -264,13 +259,18 @@ public class InitialHandler extends PacketHandler implements PendingConnection
                 {
                     if ( error == null )
                     {
-                        if ( "YES".equals( result ) )
+                        JsonObject obj = BungeeCord.getInstance().gson.fromJson( result, JsonObject.class );
+                        if ( obj != null )
                         {
-                            finish();
-                        } else
-                        {
-                            disconnect( "Not authenticated with Minecraft.net" );
+                            JsonElement id = obj.get( "id" );
+                            if ( id != null )
+                            {
+                                UUID = id.getAsString();
+                                finish();
+                                return;
+                            }
                         }
+                        disconnect( "Not authenticated with Minecraft.net" );
                     } else
                     {
                         disconnect( bungee.getTranslation( "mojang_fail" ) );
